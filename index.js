@@ -15,13 +15,13 @@ const gaussian = require('gaussian');
 
 
 // Import environment variables
-const WALLET_ADDRESS = process.env.USER_ADDRESS;
-const PRIV_KEY = process.env.USER_PRIVATE_KEY;
+const WALLET_ADDRESS = process.env.USER_ADDRESS_1;
+const PRIV_KEY = process.env.USER_PRIVATE_KEY_1;
 const RPC_URL = process.env.RPC_URL;
 const TOKEN = process.env.TARGET_TOKEN;
-const WETH = process.env.WETH;
+//const WETH = process.env.WETH;
 const ROUTER = process.env.ROUTER;
-const USDT = process.env.USDT; 
+const MELD = process.env.MELD; 
 const TX_DELAY_MIN = parseInt(process.env.TX_DELAY_MIN);
 const TX_DELAY_MAX = parseInt(process.env.TX_DELAY_MAX);
 const MIN_AMT = parseFloat(process.env.MIN_AMT);
@@ -39,8 +39,8 @@ var trades = {
 };
 
 // Contract ABI (please grant ERC20 approvals)
-const uniswapABI = require("./ABI/uniswapABI");
-const explorer = "https://bscscan.com/tx/";
+const azomiABI = require("./ABI/azomiABI");
+const explorer = "https://meldscan.io/tx/";
 
 // Initiating telegram bot
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -60,7 +60,7 @@ const BIAS_FACTOR = STRATEGY_BIAS / 100;
 
 
 // Ethers vars for web3 connections
-var wallet, provider, uniswapRouter;
+var wallet, provider, azomiRouter;
 
 // Main Function
 const main = async () => {
@@ -112,11 +112,15 @@ const connect = async () => {
   wallet = new ethers.Wallet(PRIV_KEY, provider);
 
   // uniswap router contract
-  uniswapRouter = new ethers.Contract(ROUTER, uniswapABI, wallet);
+  azomiRouter = new ethers.Contract(ROUTER, azomiABI, wallet);
+
+  const meldTokenContract = new ethers.Contract(MELD, [
+    'function balanceOf(address) view returns (uint256)'
+  ], wallet);
 
   // connection established
-  const balance = await provider.getBalance(WALLET_ADDRESS);
-  console.log("ETH Balance:" + ethers.formatEther(balance));
+  const balance = await meldTokenContract.balanceOf(WALLET_ADDRESS);
+  console.log("MELD Balance:" + ethers.formatEther(balance));
   console.log("--> connected\n");
 };
 
@@ -124,7 +128,7 @@ const connect = async () => {
 const disconnect = () => {
   wallet = null;
   provider = null;
-  uniswapRouter = null;
+  azomiRouter = null;
   console.log("-disconnected-\n");
 };
 
@@ -133,6 +137,9 @@ const AMMTrade = async () => {
   console.log("\n--- AMMTrade Start ---");
   report.push("--- AMMTrade Report ---");
   report.push(`By: ${WALLET_ADDRESS}`);
+
+
+
   try {
     const today = new Date();
     await connect();
@@ -147,8 +154,14 @@ const AMMTrade = async () => {
     const buyTime = t % 2 == 0;
 
     // execute appropriate action based on condition
-    if (buyTime) result = await buyTokensCreateVolume();
+    // if (buyTime) result = await buyTokensCreateVolume();
+    // else result = await sellTokensCreateVolume();
+
+    const randomBit = Math.floor(Math.random() * 2);
+
+    if (randomBit == 0) result = await buyTokensCreateVolume();
     else result = await sellTokensCreateVolume();
+
 
     // update on status
     report.push(result);
@@ -195,20 +208,19 @@ const sellTokensCreateVolume = async (tries = 1.0) => {
     console.log(`Selling Try #${tries}...`);
 
     // prepare the variables needed for trade
-    const path = [TOKEN, USDT, WETH];
+    const path = [TOKEN, MELD];
     const amt = await getAmt(path);
 
     if (amt === null) {
       console.log("Insufficient balance to proceed with sell operation.");
       return false;
     }
-    console.log(`Amount to sell: ${amt} ${TOKEN}`);
 
     // Check token balance and allowance
     const tokenABI = [
-      'function balanceOf(address) view returns (uint256)',
-      'function allowance(address,address) view returns (uint256)',
-      'function approve(address spender, uint256 amount) returns (bool)'
+      'function balanceOf(address owner) external view returns (uint256)',
+      'function approve(address spender, uint256 amount) external returns (bool)',
+      'function allowance(address owner, address spender) external view returns (uint256)'
     ];
 
     const tokenContract = new ethers.Contract(TOKEN, tokenABI, wallet);
@@ -218,7 +230,7 @@ const sellTokensCreateVolume = async (tries = 1.0) => {
 
 
     console.log(`Token balance: ${ethers.formatEther(balance)}`);
-    console.log(`Router allowance: ${ethers.formatEther(allowance)}`);
+    //console.log(`Router allowance: ${ethers.formatEther(allowance)}`);
 
     const amountToSell = ethers.parseEther(amt);
 
@@ -235,7 +247,7 @@ const sellTokensCreateVolume = async (tries = 1.0) => {
 
 
     // execute the swap await result
-    const result = await swapExactTokensForETH(amountToSell, path);
+    const result = await swapTokensForMeld(amountToSell, path);
 
     // succeeded
     if (result) {
@@ -270,15 +282,15 @@ const getAmt = async (path) => {
   // Use the same Gaussian distribution parameters as in buyTokensCreateVolume
   const distribution = createDistribution(false);
   
-  let sellAmountETH;
+  let sellAmountMELD;
   do {
-    sellAmountETH = distribution.ppf(Math.random());
-  } while (sellAmountETH < MIN_AMT); // Ensure the amount is at least MIN_AMT
+    sellAmountMELD = distribution.ppf(Math.random());
+  } while (sellAmountMELD < MIN_AMT); // Ensure the amount is at least MIN_AMT
 
-  console.log(`Sell Amount (in ETH value): ${sellAmountETH} ETH`);
+  console.log(`Sell Amount (in MELD value): ${sellAmountMELD} MELD`);
 
   // Convert the ETH amount to the equivalent amount of tokens
-  const amountOutMin = ethers.parseEther(sellAmountETH.toFixed(18));
+  const amountOutMin = ethers.parseEther(sellAmountMELD.toFixed(18));
   
   let low = ethers.parseEther("0.000001"); // Start with a very small amount
   let high = ethers.parseEther("1000000"); // Set an upper limit
@@ -300,7 +312,7 @@ const getAmt = async (path) => {
       continue;
     }
     
-    const result = await uniswapRouter.getAmountsOut(mid, path);
+    const result = await azomiRouter.getAmountsOut(mid, path);
     const expectedAmtOut = result[result.length - 1];
 
     if (expectedAmtOut >= amountOutMin) {
@@ -325,55 +337,55 @@ const getAmt = async (path) => {
 };
 
 // Swaps Function (assumes 18 decimals on input amountIn)
-const swapExactTokensForETH = async (amountIn, path) => {
+const swapTokensForMeld = async (amountIn, path) => {
   try {
-    const amountInFormatted = ethers.formatEther(amountIn);
-    console.log("Swapping Tokens...");
-    console.log("Amount In: " + amountInFormatted);
-
-    const amountsOut = await uniswapRouter.getAmountsOut(amountIn, path);
+    const amtInFormatted = ethers.formatEther(amountIn);
+    const amountsOut = await azomiRouter.getAmountsOut(amountIn, path);
     const expectedAmt = amountsOut[amountsOut.length - 1];
-    console.log("Expected Amount Out:", ethers.formatEther(expectedAmt));
-
     const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from now
 
     // Calculate slippage
     const slippage = 10n; // 10% slippage
     const amountOutMin = expectedAmt - (expectedAmt / slippage);
 
+    console.log("Swapping Tokens...");
+    console.log("Amount In: " + amtInFormatted);
     console.log("Amount Out Min: " + ethers.formatEther(amountOutMin));
 
-    const tx = await uniswapRouter.swapExactTokensForETH(
+    const tx = await azomiRouter.swapExactTokensForTokens(
       amountIn,
       amountOutMin,
       path,
       WALLET_ADDRESS,
-      deadline,
-      { gasLimit: 300000 }
+      deadline
     );
 
-    console.log("Transaction sent. Waiting for confirmation...");
     const receipt = await tx.wait();
-    if (receipt && receipt.status === 1) {
+    if (receipt) {
       console.log("TOKEN SWAP SUCCESSFUL");
       const transactionHash = receipt.hash;
       const t = explorer + transactionHash;
 
       return {
         type: "SELL",
-        amountIn: amountInFormatted,
+        amountIn: amtInFormatted,
         amountOutMin: ethers.formatEther(amountOutMin),
         path: path,
         wallet: WALLET_ADDRESS,
         transaction_url: t,
       };
-    } else {
-      throw new Error("Transaction failed");
     }
   } catch (error) {
-    console.error("SwapExactTokensForETH failed", error);
-    throw error;  // Re-throw the error to be caught in the calling function
+    console.error("swapTokensForMeld failed", error);
+    console.error("Transaction data:", {
+      amountIn: amtInFormatted,
+      amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
+      path,
+      WALLET_ADDRESS,
+      deadline,
+    });
   }
+  return false;
 };
 
 // AMM Volume Trading Function
@@ -390,21 +402,25 @@ const buyTokensCreateVolume = async (tries = 1.0) => {
       buyAmount = distribution.ppf(Math.random());
     } while (buyAmount < MIN_AMT); // Ensure the amount is at least MIN_AMT
 
-    console.log(`Buy Amount: ${buyAmount} ETH`);
+    console.log(`Buy Amount: ${buyAmount} MELD`);
 
     // Prepare the variables needed for the trade
     const amountIn = ethers.parseEther(buyAmount.toFixed(18)); // Use 18 decimal places
-    const path = [WETH, USDT, TOKEN];
+    const path = [MELD, TOKEN];
 
     // Execute the swap transaction and await result
-    const result = await swapExactETHForTokens(amountIn, path);
+    const result = await swapMeldForTokens(amountIn, path);
 
     if (result) {
       // Get the remaining balance of the current wallet
-      const u = await provider.getBalance(WALLET_ADDRESS);
+      const meldTokenContract = new ethers.Contract(MELD, [
+        'function balanceOf(address) view returns (uint256)'
+      ], wallet);
+
+      const u = await meldTokenContract.balanceOf(WALLET_ADDRESS);
       trades.previousTrade = new Date().toString();
       const balance = ethers.formatEther(u);
-      console.log(`Balance: ${balance} ETH`);
+      console.log(`Balance: ${balance} MELD`);
       await scheduleNext(new Date());
 
       // Successful
@@ -428,10 +444,12 @@ const buyTokensCreateVolume = async (tries = 1.0) => {
 };
 
 // Swaps Function (assumes 18 decimals on input amountIn)
-const swapExactETHForTokens = async (amountIn, path) => {
+const swapMeldForTokens = async (amountIn, path) => {
+  await approveMeld(amountIn);
+
   try {
     const amtInFormatted = ethers.formatEther(amountIn);
-    const amountsOut = await uniswapRouter.getAmountsOut(amountIn, path);
+    const amountsOut = await azomiRouter.getAmountsOut(amountIn, path);
     const expectedAmt = amountsOut[amountsOut.length - 1];
     const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from now
 
@@ -439,20 +457,16 @@ const swapExactETHForTokens = async (amountIn, path) => {
     const slippage = 10n; // 10% slippage
     const amountOutMin = expectedAmt - (expectedAmt / slippage);
 
-    const overrideOptions = {
-      value: amountIn,
-    };
-
     console.log("Swapping Tokens...");
     console.log("Amount In: " + amtInFormatted);
     console.log("Amount Out Min: " + ethers.formatEther(amountOutMin));
 
-    const tx = await uniswapRouter.swapExactETHForTokens(
+    const tx = await azomiRouter.swapExactTokensForTokens(
+      amountIn,
       amountOutMin,
       path,
       WALLET_ADDRESS,
-      deadline,
-      overrideOptions
+      deadline
     );
 
     const receipt = await tx.wait();
@@ -471,18 +485,51 @@ const swapExactETHForTokens = async (amountIn, path) => {
       };
     }
   } catch (error) {
-    console.error("SwapExactETHForTokens failed", error);
+    console.error("swapMeldForTokens failed", error);
     console.error("Transaction data:", {
       amountIn: amtInFormatted,
       amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
       path,
       WALLET_ADDRESS,
       deadline,
-      overrideOptions,
     });
   }
   return false;
 };
+
+//#region Custom Functions
+
+// Function to approve the Azomi DEX to spend MELD tokens
+async function approveMeld(amountIn) {
+  const meldTokenContract = new ethers.Contract(MELD,[
+    'function balanceOf(address owner) external view returns (uint256)',
+    'function approve(address spender, uint256 amount) external returns (bool)',
+    'function allowance(address owner, address spender) external view returns (uint256)'
+  ], wallet);
+
+  const allowance = await meldTokenContract.allowance(wallet.address, ROUTER);
+
+  if (allowance < amountIn) {
+    console.log('Approving MELD spend...');
+    const approveTx = await meldTokenContract.approve(ROUTER, amountIn);
+    await approveTx.wait();
+    console.log('Approval successful.');
+  } else {
+    console.log('Sufficient allowance already granted.');
+  }
+}
+
+function getWallet(index) {
+  const addressKey = `USER_ADDRESS_${index}`;
+  const privateKeyKey = `USER_PRIVATE_KEY_${index}`;
+
+  WALLET_ADDRESS = process.env[addressKey];
+  PRIV_KEY = process.env[privateKeyKey];
+ 
+}
+
+//#endregion
+
 
 // Send Report Function
 const sendReport = (report) => {
@@ -624,7 +671,7 @@ const createDistribution = (isBuy) => {
 
   if (BIAS_FACTOR !== 0) {
     if (BIAS_FACTOR > 0) {
-      // For positive bias (ETH profit)
+      // For positive bias (MELD profit)
       adjustedMean = isBuy 
         ? BUY_AMT_MEAN * (1 - BIAS_FACTOR) // Buy less
         : BUY_AMT_MEAN * (1 + BIAS_FACTOR); // Sell more
