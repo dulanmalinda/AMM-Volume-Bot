@@ -62,8 +62,12 @@ const BIAS_FACTOR = STRATEGY_BIAS / 100;
 // Ethers vars for web3 connections
 var wallet, provider, azomiRouter;
 
+let wallets = [];
+
 // Main Function
 const main = async () => {
+  wallets = retrieveWallets();
+
   try {
     console.log(
       figlet.textSync("AMMTrade", {
@@ -135,71 +139,75 @@ const disconnect = () => {
 // AMM Trading Function
 const AMMTrade = async () => {
 
-  const randomIdex = Math.floor(Math.random() * 100);
-  getWallet(randomIdex);
+  const randomWallet = getRandomWallet();
 
-  console.log("\n--- AMMTrade Start ---");
-  report.push("--- AMMTrade Report ---");
-  report.push(`By: ${WALLET_ADDRESS}`);
+  if (randomWallet) {
+    WALLET_ADDRESS = randomWallet.address;
+    PRIV_KEY = randomWallet.privateKey;
 
-  try {
-    const today = new Date();
-    await connect();
-    let result;
+    console.log("\n--- AMMTrade Start ---");
+    report.push("--- AMMTrade Report ---");
+    report.push(`By: ${WALLET_ADDRESS}`);
 
-    // store last traded, increase counter
-    trades.previousTrade = today.toString();
-    const t = trades["count"];
-    trades["count"] = t + 1;
+    try {
+      const today = new Date();
+      await connect();
+      let result;
 
-    // buy every 2nd iteration
-    const buyTime = t % 2 == 0;
+      // store last traded, increase counter
+      trades.previousTrade = today.toString();
+      const t = trades["count"];
+      trades["count"] = t + 1;
 
-    // execute appropriate action based on condition
-    // if (buyTime) result = await buyTokensCreateVolume();
-    // else result = await sellTokensCreateVolume();
+      // buy every 2nd iteration
+      const buyTime = t % 2 == 0;
 
-    const randomBit = Math.floor(Math.random() * 2);
+      // execute appropriate action based on condition
+      // if (buyTime) result = await buyTokensCreateVolume();
+      // else result = await sellTokensCreateVolume();
 
-    if (randomBit == 0) result = await buyTokensCreateVolume();
-    else result = await sellTokensCreateVolume();
+      const randomBit = Math.floor(Math.random() * 2);
+
+      if (randomBit == 0) result = await buyTokensCreateVolume();
+      else result = await sellTokensCreateVolume();
 
 
-    // update on status
-    report.push(result);
-  } catch (error) {
-    report.push("AMMTrade failed!");
-    report.push(error);
+      // update on status
+      report.push(result);
+    } catch (error) {
+      report.push("AMMTrade failed!");
+      report.push(error);
 
-    // try again later
-    console.error(error);
-    scheduleNext(new Date());
+      // try again later
+      console.error(error);
+      scheduleNext(new Date());
+    }
+
+    // send status update report
+    report.push({ ...trades });
+
+  // Send reports based on environment settings
+  if (SEND_EMAIL_REPORT) {
+    try {
+      await sendReport(report); // Email report
+      console.log("Email report sent successfully");
+    } catch (error) {
+      console.error("Failed to send email report:", error);
+    }
   }
 
-  // send status update report
-  report.push({ ...trades });
-
- // Send reports based on environment settings
- if (SEND_EMAIL_REPORT) {
-  try {
-    await sendReport(report); // Email report
-    console.log("Email report sent successfully");
-  } catch (error) {
-    console.error("Failed to send email report:", error);
+  if (SEND_TELEGRAM_REPORT) {
+    try {
+      await sendTelegramReport(report); // Telegram report
+      console.log("Telegram report sent successfully");
+    } catch (error) {
+      console.error("Failed to send Telegram report:", error);
+    }
   }
-}
+    report = [];
 
-if (SEND_TELEGRAM_REPORT) {
-  try {
-    await sendTelegramReport(report); // Telegram report
-    console.log("Telegram report sent successfully");
-  } catch (error) {
-    console.error("Failed to send Telegram report:", error);
-  }
-}
-  report = [];
-
-  return disconnect();
+    return disconnect();
+    }
 };
 
 // AMM Volume Trading Function
@@ -521,13 +529,90 @@ async function approveMeld(amountIn) {
   }
 }
 
-function getWallet(index) {
-  const addressKey = `USER_ADDRESS_${index}`;
-  const privateKeyKey = `USER_PRIVATE_KEY_${index}`;
+// function getWallet(index) {
+//   const addressKey = `USER_ADDRESS_${index}`;
+//   const privateKeyKey = `USER_PRIVATE_KEY_${index}`;
 
-  WALLET_ADDRESS = process.env[addressKey];
-  PRIV_KEY = process.env[privateKeyKey];
+//   WALLET_ADDRESS = process.env[addressKey];
+//   PRIV_KEY = process.env[privateKeyKey];
   
+// }
+
+function generateWallets(walletCount = 100, fileName = "wallets.txt") {
+  const wallets = [];
+
+  // Generate wallets and store them in an array
+  for (let i = 0; i < walletCount; i++) {
+    const wallet = ethers.Wallet.createRandom();
+    wallets.push({
+      privateKey: wallet.privateKey,
+      publicKey: wallet.publicKey,
+      address: wallet.address,
+    });
+  }
+
+  // Save the private and public keys to a text file
+  const data = wallets
+    .map(
+      (wallet, index) =>
+        `Wallet ${index + 1}:\nPrivate Key: ${wallet.privateKey}\nPublic Key: ${wallet.publicKey}\nAddress: ${wallet.address}\n`
+    )
+    .join("\n");
+
+  fs.writeFileSync(fileName, data);
+
+  console.log(`${walletCount} wallets generated and saved to ${fileName}`);
+
+  return wallets; // Return the wallets array for later use
+}
+
+function retrieveWallets(fileName = "wallets.txt") {
+  // Check if the file exists
+  if (!fs.existsSync(fileName)) {
+    console.log(`File ${fileName} does not exist. Generating new wallets.`);
+    return generateWallets(); // Generate and save wallets if the file doesn't exist
+  }
+
+  // Read the file content
+  const fileContent = fs.readFileSync(fileName, "utf-8");
+
+  // Handle empty file
+  if (fileContent.trim().length === 0) {
+    console.log(`File ${fileName} is empty. Generating new wallets.`);
+    return generateWallets(); // Generate new wallets if the file is empty
+  }
+
+  const wallets = [];
+  // Split the file content into wallets by splitting on double new lines
+  const walletBlocks = fileContent.split(/\n\n/);
+
+  walletBlocks.forEach((block) => {
+    const privateKey = block.match(/Private Key:\s*(.*)/)?.[1];
+    const publicKey = block.match(/Public Key:\s*(.*)/)?.[1];
+    const address = block.match(/Address:\s*(.*)/)?.[1];
+
+    if (privateKey && publicKey && address) {
+      wallets.push({
+        privateKey,
+        publicKey,
+        address,
+      });
+    }
+  });
+
+  console.log(`${wallets.length} wallets retrieved from ${fileName}`);
+
+  return wallets; // Return the array of wallets
+}
+
+function getRandomWallet() {
+  if (wallets.length === 0) {
+    console.log("No wallets available. Please generate wallets first.");
+    return null;
+  }
+
+  const randomIndex = Math.floor(Math.random() * wallets.length);
+  return wallets[randomIndex];
 }
 
 //#endregion
