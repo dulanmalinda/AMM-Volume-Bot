@@ -1,0 +1,58 @@
+# ========
+# = NODE =
+# ========
+RPC_URL="https://rpc-1.meld.com"
+
+# =========
+# = WALLETS =
+# =========
+USER_ADDRESS=""
+USER_PRIVATE_KEY=""
+
+# =========
+# = AMM SETTINGS =
+# =========
+TARGET_TOKEN=""
+MELD="0x333000333528b1e38884a5d1EF13615B0C17a301"
+ROUTER="0x16238142535e54606211d9ea5678443736461dBA"
+
+# =========
+# = TRADE PARAMETERS =
+# - Time is expressed in minutes
+# - AMT is expressed in MELD
+# =========
+TX_DELAY_MIN=1
+TX_DELAY_MAX=5
+MIN_AMT=18
+BUY_AMT_MEAN=10
+BUY_AMT_STD_DEV=10
+
+# =========
+# = STRATEGY =
+# Decide if overall taking some profits ( sell more than buy), or accumulating tokens ( buy more than sells)
+# Positive percentages (0 to 100) trend towards ETH profit
+# Negative percentages (-100 to 0) trend towards token accumulation.
+# 0 maintains a neutral strategy.
+# =========
+STRATEGY_BIAS= 0
+
+# =========
+# = OPTIONS =
+# =========
+SEND_EMAIL_REPORT=false
+SEND_TELEGRAM_REPORT=false
+
+# =========
+# = EMAIL =
+# =========
+RECIPIENT=""
+EMAIL_ADDR=""
+EMAIL_PW=""
+
+# =========
+# = TELEGRAM BOT =
+# =========
+TELEGRAM_CHAT_ID="-"
+TELEGRAM_THREAD_ID=""
+TELEGRAM_BOT_TOKEN = ""
+
