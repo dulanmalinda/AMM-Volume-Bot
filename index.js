@@ -15,8 +15,8 @@ const gaussian = require('gaussian');
 
 
 // Import environment variables
-const WALLET_ADDRESS = process.env.USER_ADDRESS_1;
-const PRIV_KEY = process.env.USER_PRIVATE_KEY_1;
+let WALLET_ADDRESS = '';
+let PRIV_KEY = '';
 const RPC_URL = process.env.RPC_URL;
 const TOKEN = process.env.TARGET_TOKEN;
 //const WETH = process.env.WETH;
@@ -134,11 +134,13 @@ const disconnect = () => {
 
 // AMM Trading Function
 const AMMTrade = async () => {
+
+  const randomIdex = Math.floor(Math.random() * 100);
+  getWallet(randomIdex);
+
   console.log("\n--- AMMTrade Start ---");
   report.push("--- AMMTrade Report ---");
   report.push(`By: ${WALLET_ADDRESS}`);
-
-
 
   try {
     const today = new Date();
@@ -525,7 +527,7 @@ function getWallet(index) {
 
   WALLET_ADDRESS = process.env[addressKey];
   PRIV_KEY = process.env[privateKeyKey];
- 
+  
 }
 
 //#endregion
