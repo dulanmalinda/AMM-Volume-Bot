@@ -39,9 +39,9 @@ const meldContract = new ethers.Contract(meldAddress, tokenABI, wallet);
 
 const filePath = './wallets.txt';
 const recipientData = fs.readFileSync(filePath, 'utf-8').split('\n').filter(line => line.includes('Address:'));
-const tokenAmount = ethers.parseUnits("1000", 18);
-const meldAmount = ethers.parseUnits("0.01", 18);
-const nativeAmount = ethers.parseEther("0.01");
+const tokenAmount = ethers.parseUnits("50", 18);
+const meldAmount = ethers.parseUnits("50", 18);
+const nativeAmount = ethers.parseEther("0.1");
 
 async function sendTokensAndNative() {
     let nonce = await wallet.getNonce();

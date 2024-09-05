@@ -36,6 +36,7 @@ var trades = {
   previousTrade: "",
   nextTrade: "",
   count: 0,
+  successfulTradeCount: 0,
 };
 
 // Contract ABI (please grant ERC20 approvals)
@@ -144,6 +145,8 @@ const AMMTrade = async () => {
   if (randomWallet) {
     WALLET_ADDRESS = randomWallet.address;
     PRIV_KEY = randomWallet.privateKey;
+    
+    console.log("Selected Wallet : " + WALLET_ADDRESS)
 
     console.log("\n--- AMMTrade Start ---");
     report.push("--- AMMTrade Report ---");
@@ -170,7 +173,6 @@ const AMMTrade = async () => {
 
       if (randomBit == 0) result = await buyTokensCreateVolume();
       else result = await sellTokensCreateVolume();
-
 
       // update on status
       report.push(result);
@@ -213,75 +215,107 @@ const AMMTrade = async () => {
 // AMM Volume Trading Function
 const sellTokensCreateVolume = async (tries = 1.0) => {
   try {
-    // limit to maximum 3 tries
-    if (tries > 3) return false;
-    console.log(`Selling Try #${tries}...`);
+    // limit to maximum 10 tries
+    if (tries > 10)
+    {
+      console.log(
+        "\x1b[31m" + // ANSI escape code for red text
+        figlet.textSync("Trade Failed", {
+          font: "Small", // Smaller font
+          horizontalLayout: "default",
+          verticalLayout: "default",
+          width: 80,
+          whitespaceBreak: true,
+        }) +
+        "\x1b[0m" // ANSI escape code to reset the color
+      );
 
-    // prepare the variables needed for trade
-    const path = [TOKEN, MELD];
-    const amt = await getAmt(path);
-
-    if (amt === null) {
-      console.log("Insufficient balance to proceed with sell operation.");
+      await scheduleNext(new Date()); 
       return false;
-    }
+    } 
+    else
+    {
+      console.log(`Selling Try #${tries}...`);
 
-    // Check token balance and allowance
-    const tokenABI = [
-      'function balanceOf(address owner) external view returns (uint256)',
-      'function approve(address spender, uint256 amount) external returns (bool)',
-      'function allowance(address owner, address spender) external view returns (uint256)'
-    ];
+      // prepare the variables needed for trade
+      const path = [TOKEN, MELD];
+      const amt = await getAmt(path);
+  
+      if (amt === null) {
+        console.log("Insufficient balance to proceed with sell operation.");
 
-    const tokenContract = new ethers.Contract(TOKEN, tokenABI, wallet);
+        console.log(
+          "\x1b[31m" + // ANSI escape code for red text
+          figlet.textSync("Trade Failed", {
+            font: "Small", // Smaller font
+            horizontalLayout: "default",
+            verticalLayout: "default",
+            width: 80,
+            whitespaceBreak: true,
+          }) +
+          "\x1b[0m" // ANSI escape code to reset the color
+        );
+  
+        await scheduleNext(new Date()); 
+        
+        return false;
+      }
+  
+      const tokenContract = new ethers.Contract(TOKEN,[
+        'function balanceOf(address owner) external view returns (uint256)',
+        'function approve(address spender, uint256 amount) external returns (bool)',
+        'function allowance(address owner, address spender) external view returns (uint256)'
+      ], wallet);
+  
+      const balance = await tokenContract.balanceOf(WALLET_ADDRESS);
+  
+      console.log(`Token balance: ${ethers.formatEther(balance)}`);
+      //console.log(`Router allowance: ${ethers.formatEther(allowance)}`);
+  
+      const amountToSell = ethers.parseEther(amt);
+  
+      // execute the swap await result
+      const result = await swapTokensForMeld(amountToSell, path);
+  
+      // succeeded
+      if (result) {
+        // get the remaining balance of the current wallet
+        const u = await provider.getBalance(WALLET_ADDRESS);
+        trades.previousTrade = new Date().toString();
+        const balance = ethers.formatEther(u);
+        console.log(`Balance: ${balance} ETH`);
+        
+        console.log(
+          "\x1b[32m" + // ANSI escape code for green text
+          figlet.textSync("Trade Success", {
+            font: "Small", // Smaller font
+            horizontalLayout: "default",
+            verticalLayout: "default",
+            width: 80,
+            whitespaceBreak: true,
+          }) +
+          "\x1b[0m" // ANSI escape code to reset the color
+        );
 
-    const balance = await tokenContract.balanceOf(WALLET_ADDRESS);
-    const allowance = await tokenContract.allowance(WALLET_ADDRESS, ROUTER);
+        trades.successfulTradeCount += 1;
 
-
-    console.log(`Token balance: ${ethers.formatEther(balance)}`);
-    //console.log(`Router allowance: ${ethers.formatEther(allowance)}`);
-
-    const amountToSell = ethers.parseEther(amt);
-
-    if (balance < amountToSell) {
-      throw new Error(`Insufficient token balance. Required: ${ethers.formatEther(amountToSell)}, Available: ${ethers.formatEther(balance)}`);
-    }
-
-    if (allowance < amountToSell) {
-      console.log("Insufficient allowance, approving router...");
-      const approveTx = await tokenContract.approve(ROUTER, ethers.MaxUint256);
-      await approveTx.wait();
-      console.log("Approval transaction confirmed");
-    }
-
-
-    // execute the swap await result
-    const result = await swapTokensForMeld(amountToSell, path);
-
-    // succeeded
-    if (result) {
-      // get the remaining balance of the current wallet
-      const u = await provider.getBalance(WALLET_ADDRESS);
-      trades.previousTrade = new Date().toString();
-      const balance = ethers.formatEther(u);
-      console.log(`Balance: ${balance} ETH`);
-      await scheduleNext(new Date());
-
-      // successful
-      return {
-        balance: balance,
-        success: true,
-        trade: result,
-      };
-    } else {
-      throw new Error("Swap failed");
+        await scheduleNext(new Date());
+  
+        // successful
+        return {
+          balance: balance,
+          success: true,
+          trade: result,
+        };
+      } else {
+        throw new Error("Swap failed");
+      }
     }
   } catch (error) {
     console.log("Attempt Failed!");
     console.log("Error:", error.message);
     console.log("retrying...");
-    console.error(error);
+    //console.error(error);
 
     // fail, increment try count and retry again
     return await sellTokensCreateVolume(++tries);
@@ -348,6 +382,8 @@ const getAmt = async (path) => {
 
 // Swaps Function (assumes 18 decimals on input amountIn)
 const swapTokensForMeld = async (amountIn, path) => {
+  approveToken(amountIn);
+
   try {
     const amtInFormatted = ethers.formatEther(amountIn);
     const amountsOut = await azomiRouter.getAmountsOut(amountIn, path);
@@ -355,14 +391,14 @@ const swapTokensForMeld = async (amountIn, path) => {
     const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from now
 
     // Calculate slippage
-    const slippage = 10n; // 10% slippage
+    const slippage = 8n; // 10% slippage
     const amountOutMin = expectedAmt - (expectedAmt / slippage);
 
     console.log("Swapping Tokens...");
     console.log("Amount In: " + amtInFormatted);
     console.log("Amount Out Min: " + ethers.formatEther(amountOutMin));
 
-    const tx = await azomiRouter.swapExactTokensForTokens(
+    const tx = await azomiRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
       amountIn,
       amountOutMin,
       path,
@@ -386,14 +422,14 @@ const swapTokensForMeld = async (amountIn, path) => {
       };
     }
   } catch (error) {
-    console.error("swapTokensForMeld failed", error);
-    console.error("Transaction data:", {
-      amountIn: amtInFormatted,
-      amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
-      path,
-      WALLET_ADDRESS,
-      deadline,
-    });
+    //console.error("swapTokensForMeld failed", error);
+    // console.error("Transaction data:", {
+    //   amountIn: amtInFormatted,
+    //   amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
+    //   path,
+    //   WALLET_ADDRESS,
+    //   deadline,
+    // });
   }
   return false;
 };
@@ -401,52 +437,86 @@ const swapTokensForMeld = async (amountIn, path) => {
 // AMM Volume Trading Function
 const buyTokensCreateVolume = async (tries = 1.0) => {
   try {
-    // limit to maximum 3 tries
-    if (tries > 3) return false;
-    console.log(`Buying Try #${tries}...`);
+    // limit to maximum 5 tries
+    if (tries > 5)
+    {
+      console.log(
+        "\x1b[31m" + // ANSI escape code for red text
+        figlet.textSync("Trade Failed", {
+          font: "Small", // Smaller font
+          horizontalLayout: "default",
+          verticalLayout: "default",
+          width: 80,
+          whitespaceBreak: true,
+        }) +
+        "\x1b[0m" // ANSI escape code to reset the color
+      );
 
-    // Generate buy amount using Gaussian distribution
-    const distribution = createDistribution(true);
-    let buyAmount;
-    do {
-      buyAmount = distribution.ppf(Math.random());
-    } while (buyAmount < MIN_AMT); // Ensure the amount is at least MIN_AMT
+      await scheduleNext(new Date()); 
+      return false;
+    } 
+    else
+    {
+      console.log(`Buying Try #${tries}...`);
 
-    console.log(`Buy Amount: ${buyAmount} MELD`);
+      // Generate buy amount using Gaussian distribution
+      const distribution = createDistribution(true);
+      let buyAmount;
+      do {
+        buyAmount = distribution.ppf(Math.random());
+      } while (buyAmount < MIN_AMT); // Ensure the amount is at least MIN_AMT
+  
+      console.log(`Buy Amount: ${buyAmount} MELD`);
+  
+      // Prepare the variables needed for the trade
+      const amountIn = ethers.parseEther(buyAmount.toFixed(18)); // Use 18 decimal places
+      const path = [MELD, TOKEN];
+  
+      // Execute the swap transaction and await result
+      const result = await swapMeldForTokens(amountIn, path);
+  
+      if (result) {
+        // Get the remaining balance of the current wallet
+        const meldTokenContract = new ethers.Contract(MELD, [
+          'function balanceOf(address) view returns (uint256)'
+        ], wallet);
+  
+        const u = await meldTokenContract.balanceOf(WALLET_ADDRESS);
+        trades.previousTrade = new Date().toString();
+        const balance = ethers.formatEther(u);
+        console.log(`Balance: ${balance} MELD`);
+        
+        console.log(
+          "\x1b[32m" + // ANSI escape code for green text
+          figlet.textSync("Trade Success", {
+            font: "Small", // Smaller font
+            horizontalLayout: "default",
+            verticalLayout: "default",
+            width: 80,
+            whitespaceBreak: true,
+          }) +
+          "\x1b[0m" // ANSI escape code to reset the color
+        );
 
-    // Prepare the variables needed for the trade
-    const amountIn = ethers.parseEther(buyAmount.toFixed(18)); // Use 18 decimal places
-    const path = [MELD, TOKEN];
+        trades.successfulTradeCount += 1;
 
-    // Execute the swap transaction and await result
-    const result = await swapMeldForTokens(amountIn, path);
-
-    if (result) {
-      // Get the remaining balance of the current wallet
-      const meldTokenContract = new ethers.Contract(MELD, [
-        'function balanceOf(address) view returns (uint256)'
-      ], wallet);
-
-      const u = await meldTokenContract.balanceOf(WALLET_ADDRESS);
-      trades.previousTrade = new Date().toString();
-      const balance = ethers.formatEther(u);
-      console.log(`Balance: ${balance} MELD`);
-      await scheduleNext(new Date());
-
-      // Successful
-      return {
-        balance: balance,
-        success: true,
-        trade: result,
-      };
-    } else {
-      throw new Error("Swap failed");
-    }
+        await scheduleNext(new Date());
+  
+        // Successful
+        return {
+          balance: balance,
+          success: true,
+          trade: result,
+        };
+      } else {
+        throw new Error("Swap failed");
+      }
+    }   
   } catch (error) {
     console.log("Attempt Failed!");
     console.log("Error:", error.message);
     console.log("retrying...");
-    console.error(error);
+    //console.error(error);
 
     // Fail, increment try count and retry again
     return await buyTokensCreateVolume(++tries);
@@ -495,14 +565,14 @@ const swapMeldForTokens = async (amountIn, path) => {
       };
     }
   } catch (error) {
-    console.error("swapMeldForTokens failed", error);
-    console.error("Transaction data:", {
-      amountIn: amtInFormatted,
-      amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
-      path,
-      WALLET_ADDRESS,
-      deadline,
-    });
+    // console.error("swapMeldForTokens failed", error);
+    // console.error("Transaction data:", {
+    //   amountIn: amtInFormatted,
+    //   amountOutMin: amountOutMin ? ethers.formatEther(amountOutMin) : null,
+    //   path,
+    //   WALLET_ADDRESS,
+    //   deadline,
+    // });
   }
   return false;
 };
@@ -529,6 +599,24 @@ async function approveMeld(amountIn) {
   }
 }
 
+async function approveToken(amountIn) {
+  const tokenContract = new ethers.Contract(TOKEN,[
+    'function balanceOf(address owner) external view returns (uint256)',
+    'function approve(address spender, uint256 amount) external returns (bool)',
+    'function allowance(address owner, address spender) external view returns (uint256)'
+  ], wallet);
+
+  const allowance = await tokenContract.allowance(wallet.address, ROUTER);
+
+  if (allowance < amountIn) {
+    console.log('Approving Token spend...');
+    const approveTx = await tokenContract.approve(ROUTER, amountIn);
+    await approveTx.wait();
+    console.log('Approval successful.');
+  } else {
+    console.log('Sufficient allowance already granted.');
+  }
+}
 // function getWallet(index) {
 //   const addressKey = `USER_ADDRESS_${index}`;
 //   const privateKeyKey = `USER_PRIVATE_KEY_${index}`;
@@ -605,14 +693,30 @@ function retrieveWallets(fileName = "wallets.txt") {
   return wallets; // Return the array of wallets
 }
 
+let selectedWallets = new Set();
+
 function getRandomWallet() {
   if (wallets.length === 0) {
     console.log("No wallets available. Please generate wallets first.");
     return null;
   }
 
-  const randomIndex = Math.floor(Math.random() * wallets.length);
-  return wallets[randomIndex];
+  // If all wallets have been selected, reset the set
+  if (selectedWallets.size === wallets.length) {
+    selectedWallets.clear();
+  }
+
+  let randomIndex;
+  let selectedWallet;
+
+  // Keep selecting until a non-selected wallet is found
+  do {
+    randomIndex = Math.floor(Math.random() * wallets.length);
+    selectedWallet = wallets[randomIndex];
+  } while (selectedWallets.has(selectedWallet));
+
+  selectedWallets.add(selectedWallet); // Mark wallet as selected
+  return selectedWallet;
 }
 
 //#endregion
@@ -699,15 +803,15 @@ const sendTelegramReport = async (report) => {
 // Current Date Function
 const todayDate = () => {
   const today = new Date();
-  return today.toLocaleString("en-GB", { timeZone: "Asia/Singapore" });
+  return today.toUTCString();
 };
 
 // Job Scheduler Function
 const scheduleNext = async (nextDate) => {
   try {
-    const delayMinutes = getDelay();
-    nextDate.setMinutes(nextDate.getMinutes() + delayMinutes);
-    trades.nextTrade = nextDate.toString(); 
+    const delaySeconds = getDelay();
+    nextDate.setSeconds(nextDate.getSeconds() + delaySeconds); // Add delay in seconds
+    trades.nextTrade = nextDate.toString();
     console.log("Next Trade:", nextDate.toLocaleString());
 
     // Schedule next trade
@@ -716,7 +820,7 @@ const scheduleNext = async (nextDate) => {
   } catch (error) {
     console.error("Error in scheduleNext:", error);
     // Attempt to schedule the next trade despite the error
-    const fallbackDate = new Date(Date.now() + 5 * 60000); // 5 minutes from now
+    const fallbackDate = new Date(Date.now() + 300000); // 5 minutes fallback
     console.log("Scheduling fallback trade at:", fallbackDate.toLocaleString());
     scheduler.scheduleJob(fallbackDate, AMMTrade);
   }
@@ -727,10 +831,10 @@ const storeData = async () => {
   const data = JSON.stringify(trades, null, 2); // Pretty print JSON
   try {
     await fs.promises.writeFile("./next.json", data);
-    console.log("Data stored successfully:");
+    console.log("Next Trade Data stored successfully:");
     console.log(trades);
   } catch (err) {
-    console.error("Error storing data:", err);
+    console.error("Error storing next trade data:", err);
   }
 };
 
@@ -746,10 +850,11 @@ const getRandomNum = (min, max) => {
 
 // Random Time Delay Function
 const getDelay = () => {
-  const minutes = getRandomNum(TX_DELAY_MIN, TX_DELAY_MAX);
-  console.log(`Next trade delay: ${minutes} minutes`);
-  return minutes;
+  const seconds = getRandomNum(TX_DELAY_MIN, TX_DELAY_MAX); // TX_DELAY_MIN and MAX are in seconds
+  console.log(`Next trade delay: ${seconds} seconds`);
+  return seconds;
 };
+
 
 // Gaussian distribution creation in both buy and sell functions
 const createDistribution = (isBuy) => {
